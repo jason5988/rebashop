@@ -173,6 +173,9 @@ async function handleEvent(event) {
     }
 
     if (text === '我的點數' || text === '點數') {
+      if (!config.POINTS_ENABLED) {
+        return replyText(event.replyToken, '此功能目前暫停中，敬請期待！');
+      }
       const points = await sheets.getPoints(userId);
       return client.replyMessage({
         replyToken: event.replyToken,
@@ -181,6 +184,9 @@ async function handleEvent(event) {
     }
 
     if (text === '我要推薦碼' || text === '推薦碼') {
+      if (!config.REFERRAL_ENABLED) {
+        return replyText(event.replyToken, '此功能目前暫停中，敬請期待！');
+      }
       let code = await sheets.getReferralCode(userId);
       if (!code) {
         code = generateReferralCode(config.REFERRAL_CODE_LENGTH);
@@ -228,7 +234,7 @@ async function handleEvent(event) {
 
       // 介紹人待領贈品為 0 時，額外推送推薦碼宣傳訊息
       console.log('[查詢帳戶] referrerBags:', summary.referrerBags);
-      if (summary.referrerBags === 0) {
+      if (config.REFERRAL_ENABLED && summary.referrerBags === 0) {
         let code = await sheets.getReferralCode(userId);
         if (!code) {
           code = generateReferralCode(config.REFERRAL_CODE_LENGTH);
@@ -336,10 +342,26 @@ async function handleEvent(event) {
 
     // 預設回覆 - 顯示使用說明
     console.log('[預設回覆] text:', text, 'userId:', userId);
-    return replyText(
-      event.replyToken,
-      '歡迎光臨!🛍️\n\n輸入「我要買」查看商品分類\n輸入「購物車」查看目前購物車內容\n輸入「我的訂單」查詢歷史訂單\n輸入「查詢帳戶」查看可兌換包數與推薦贈品\n輸入「我要推薦碼」取得專屬推薦碼\n輸入「看本月活動」查看最新活動\n輸入「團購辦法」了解團購優惠\n輸入「關於我們」認識我們的故事\n輸入「跟老闆說說」聯絡我們'
-    );
+    {
+      const menuLines = [
+        '歡迎光臨!🛍️',
+        '',
+        '輸入「我要買」查看商品分類',
+        '輸入「購物車」查看目前購物車內容',
+        '輸入「我的訂單」查詢歷史訂單',
+      ];
+      if (config.POINTS_ENABLED || config.REFERRAL_ENABLED) {
+        menuLines.push('輸入「查詢帳戶」查看可兌換包數與推薦贈品');
+      }
+      if (config.REFERRAL_ENABLED) {
+        menuLines.push('輸入「我要推薦碼」取得專屬推薦碼');
+      }
+      menuLines.push('輸入「看本月活動」查看最新活動');
+      menuLines.push('輸入「團購辦法」了解團購優惠');
+      menuLines.push('輸入「關於我們」認識我們的故事');
+      menuLines.push('輸入「跟老闆說說」聯絡我們');
+      return replyText(event.replyToken, menuLines.join('\n'));
+    }
   }
 
   // Postback 事件(按鈕點擊)
@@ -635,6 +657,13 @@ async function handleCvsInfoInput(event, userId, text) {
  * 有點數 → 進入兌換步驟；沒有 → 直接進入備註步驟
  */
 async function proceedToRedeemOrNote(event, userId) {
+  if (!config.POINTS_ENABLED) {
+    userStates[userId] = 'AWAITING_NOTE';
+    return client.replyMessage({
+      replyToken: event.replyToken,
+      messages: [flex.buildNoteChoice()],
+    });
+  }
   const points = await sheets.getPoints(userId);
   if (points > 0) {
     userStates[userId] = 'AWAITING_REDEEM';
@@ -701,6 +730,9 @@ async function handleRedeemInput(event, userId, text) {
  * 備註完成後進入推薦碼詢問步驟
  */
 async function proceedToReferral(event, userId) {
+  if (!config.REFERRAL_ENABLED) {
+    return proceedToAdCode(event, userId);
+  }
   const alreadyUsed = config.REFERRAL_LIMIT_ONCE
     ? await sheets.checkUserUsedReferral(userId)
     : false;
@@ -966,7 +998,7 @@ app.post('/ecpay/callback', express.urlencoded({ extended: false }), async (req,
         // ===== 兌換點數扣除 =====
         let pointsDeducted = 0;
         let redeemItemsCount = 0;
-        if (order.note) {
+        if (config.POINTS_ENABLED && order.note) {
           // 同時支援新格式「兌換:數字」和舊格式「兌換 數字 包」
           const redeemMatch = order.note.match(/兌換:(\d+)/) || order.note.match(/兌換\s*(\d+)\s*包/);
           if (redeemMatch) {
@@ -978,8 +1010,10 @@ app.post('/ecpay/callback', express.urlencoded({ extended: false }), async (req,
         }
 
         // ===== 累積本次消費點數 =====
-        const earnedPoints = Math.floor(Number(order.totalAmount) / config.POINTS_PER_AMOUNT);
-        let updatedPoints = await sheets.getPoints(order.userId);
+        const earnedPoints = config.POINTS_ENABLED
+          ? Math.floor(Number(order.totalAmount) / config.POINTS_PER_AMOUNT)
+          : 0;
+        let updatedPoints = config.POINTS_ENABLED ? await sheets.getPoints(order.userId) : 0;
         if (earnedPoints > 0) {
           updatedPoints = await sheets.updatePoints(order.userId, earnedPoints);
         }
@@ -989,7 +1023,7 @@ app.post('/ecpay/callback', express.urlencoded({ extended: false }), async (req,
         let refereeGiftText = '';
         let referrerGiftText = '';
 
-        if (order.note) {
+        if (config.REFERRAL_ENABLED && order.note) {
           const referralMatch = order.note.match(/推薦碼:([A-Z0-9]+)/);
           if (referralMatch) {
             referralCode = referralMatch[1];
@@ -1063,7 +1097,7 @@ app.post('/ecpay/callback', express.urlencoded({ extended: false }), async (req,
         }
 
         // ===== 檢查介紹人是否有待寄贈品 =====
-        const pendingGifts = await sheets.getPendingGifts(order.userId);
+        const pendingGifts = config.REFERRAL_ENABLED ? await sheets.getPendingGifts(order.userId) : [];
         console.log('[callback] 待寄贈品查詢結果:', pendingGifts.map(g => ({ role: g.role, bags: g.bags, sourceOrderId: g.sourceOrderId })));
         const referrerGifts = pendingGifts.filter((g) => g.role === '介紹人');
         console.log('[callback] 介紹人待寄贈品筆數:', referrerGifts.length);
@@ -1136,9 +1170,11 @@ app.post('/ecpay/callback', express.urlencoded({ extended: false }), async (req,
           noticeLines.push(`・推薦人禮（活動3）：${referrerTotalBags} 包`);
         }
 
-        noticeLines.push(``);
-        noticeLines.push(`🌟 尚未領取`);
-        noticeLines.push(`・訂單累贈包數（活動2）：${updatedPoints} 包（下次可兌換）`);
+        if (config.POINTS_ENABLED) {
+          noticeLines.push(``);
+          noticeLines.push(`🌟 尚未領取`);
+          noticeLines.push(`・訂單累贈包數（活動2）：${updatedPoints} 包（下次可兌換）`);
+        }
 
         console.log('[callback] 準備推播付款成功通知 to:', order.userId);
         try {

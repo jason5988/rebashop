@@ -860,16 +860,24 @@ function buildAccountSummary({ name, phone, points, referrerBags, refereeBags, c
   const rows = [
     { label: '姓名', value: name || '未設定' },
     { label: '電話', value: phone || '未設定' },
-    { label: '訂單累贈包數', value: `${redeemable} 包`, highlight: true },
-    { label: '兌換商品', value: config.REDEEM_PRODUCT_NAME },
   ];
 
-  if (referrerBags > 0) {
-    rows.push({ label: '推薦贈品待領', value: `${referrerBags} 包（下次訂單隨貨寄出）` });
-  } else {
-    rows.push({ label: '推薦贈品待領', value: '0 包' });
+  if (config.POINTS_ENABLED) {
+    rows.push({ label: '訂單累贈包數', value: `${redeemable} 包`, highlight: true });
+    rows.push({ label: '兌換商品', value: config.REDEEM_PRODUCT_NAME });
   }
-  if (totalPendingBags === 0 && points === 0) {
+
+  if (config.REFERRAL_ENABLED) {
+    if (referrerBags > 0) {
+      rows.push({ label: '推薦贈品待領', value: `${referrerBags} 包（下次訂單隨貨寄出）` });
+    } else {
+      rows.push({ label: '推薦贈品待領', value: '0 包' });
+    }
+  }
+
+  if (!config.POINTS_ENABLED && !config.REFERRAL_ENABLED) {
+    rows.push({ label: '說明', value: '目前無累贈或推薦活動' });
+  } else if (totalPendingBags === 0 && points === 0) {
     rows.push({ label: '說明', value: '尚無訂單累贈包數或推薦贈品' });
   }
 
