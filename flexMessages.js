@@ -6,7 +6,7 @@
  * @param {Array} categories - 分類清單
  * @param {String} headerText - 卡片上方說明文字(選填)
  */
-function buildCategoryMenu(categories, headerText) {
+function buildCategoryMenu(categories, shippingNoteText) {
   const buttons = categories.map((cat) => ({
     type: 'button',
     style: 'primary',
@@ -37,15 +37,14 @@ function buildCategoryMenu(categories, headerText) {
     },
   ];
 
-  if (headerText) {
-    headerContents.push({ type: 'separator', margin: 'md' });
+  if (shippingNoteText) {
     headerContents.push({
       type: 'text',
-      text: headerText,
+      text: shippingNoteText,
       size: 'xs',
-      color: '#555555',
+      color: '#FF0000',
+      margin: 'sm',
       wrap: true,
-      margin: 'md',
     });
   }
 
@@ -136,7 +135,7 @@ function buildProductCarousel(products, category) {
 /**
  * 購物車內容顯示
  */
-function buildCartSummary(cartItems, totalAmount) {
+function buildCartSummary(cartItems, totalAmount, config) {
   if (!cartItems || cartItems.length === 0) {
     return {
       type: 'text',
@@ -256,6 +255,20 @@ function buildCartSummary(cartItems, totalAmount) {
         layout: 'vertical',
         spacing: 'sm',
         contents: [
+          ...(config && totalAmount < config.FREE_SHIPPING_THRESHOLD
+            ? [
+                {
+                  type: 'button',
+                  style: 'secondary',
+                  action: {
+                    type: 'postback',
+                    label: `未滿${config.FREE_SHIPPING_THRESHOLD}元繼續選購`,
+                    data: 'action=continueShopping',
+                    displayText: '繼續選購',
+                  },
+                },
+              ]
+            : []),
           {
             type: 'button',
             style: 'primary',
@@ -1137,7 +1150,7 @@ function buildPaymentButton(order, paymentUrl) {
       ? { label: '商品金額', value: `NT$ ${order.subtotal}` }
       : null,
     order.shippingFee > 0
-      ? { label: `運費(未滿NT$${order.freeShippingThreshold})`, value: `NT$ ${order.shippingFee}` }
+      ? { label: `運費(未滿NT$${order.freeShippingThreshold})`, value: `NT$ ${order.shippingFee}`, isShipping: true }
       : null,
     { label: '總金額', value: `NT$ ${order.totalAmount}` },
   ]
@@ -1146,8 +1159,8 @@ function buildPaymentButton(order, paymentUrl) {
       type: 'box',
       layout: 'horizontal',
       contents: [
-        { type: 'text', text: row.label, size: 'sm', color: '#999999', flex: 2 },
-        { type: 'text', text: String(row.value), size: 'sm', flex: 3, wrap: true, align: 'end' },
+        { type: 'text', text: row.label, size: 'sm', color: row.isShipping ? '#FF0000' : '#999999', flex: 2 },
+        { type: 'text', text: String(row.value), size: 'sm', flex: 3, wrap: true, align: 'end', color: row.isShipping ? '#FF0000' : '#000000' },
       ],
     }));
 

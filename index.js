@@ -144,14 +144,17 @@ async function handleEvent(event) {
       }
       return client.replyMessage({
         replyToken: event.replyToken,
-        messages: [flex.buildCategoryMenu(categories)],
+        messages: [flex.buildCategoryMenu(
+          categories,
+          `運費${config.SHIPPING_FEE}元，結帳金額滿${config.FREE_SHIPPING_THRESHOLD}元免運`
+        )],
       });
     }
 
     if (text === '購物車' || text === 'cart') {
       const cartItems = getCart(userId);
       const total = calcTotal(cartItems);
-      const message = flex.buildCartSummary(cartItems, total);
+      const message = flex.buildCartSummary(cartItems, total, config);
       return client.replyMessage({
         replyToken: event.replyToken,
         messages: [message],
@@ -421,7 +424,7 @@ async function handleEvent(event) {
         const total = calcTotal(cartItems);
         return client.replyMessage({
           replyToken: event.replyToken,
-          messages: [flex.buildCartSummary(cartItems, total)],
+          messages: [flex.buildCartSummary(cartItems, total, config)],
         });
       }
 
@@ -439,7 +442,7 @@ async function handleEvent(event) {
       const total = calcTotal(updatedCart);
       return client.replyMessage({
         replyToken: event.replyToken,
-        messages: [flex.buildCartSummary(updatedCart, total)],
+        messages: [flex.buildCartSummary(updatedCart, total, config)],
       });
     }
 
@@ -452,6 +455,21 @@ async function handleEvent(event) {
       return client.replyMessage({
         replyToken: event.replyToken,
         messages: [flex.buildDeliveryChoice()],
+      });
+    }
+
+    // 購物車未滿免運門檻時，「繼續選購」按鈕 → 跳出商品分類選單
+    if (action === 'continueShopping') {
+      const categories = await sheets.getCategories();
+      if (categories.length === 0) {
+        return replyText(event.replyToken, '目前尚未上架任何商品,請稍後再來看看!');
+      }
+      return client.replyMessage({
+        replyToken: event.replyToken,
+        messages: [flex.buildCategoryMenu(
+          categories,
+          `運費${config.SHIPPING_FEE}元，結帳金額滿${config.FREE_SHIPPING_THRESHOLD}元免運`
+        )],
       });
     }
 
