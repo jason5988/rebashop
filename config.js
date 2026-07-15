@@ -11,6 +11,19 @@ module.exports = {
   // false = 完全關閉(客人看不到推薦碼相關選項，結帳流程也會跳過)
   REFERRAL_ENABLED: false,
 
+  // 是否啟用「看本月活動」指令
+  MONTHLY_EVENT_ENABLED: false,
+
+  // 是否啟用「團購辦法」指令
+  GROUP_BUY_ENABLED: false,
+
+  // ===== 運費設定 =====
+  // 訂單金額(不含運費)未滿此金額時，自動加收運費
+  FREE_SHIPPING_THRESHOLD: 1200,
+
+  // 未滿門檻時加收的運費金額
+  SHIPPING_FEE: 110,
+
   // ===== 累積設定 =====
   // 每消費幾元累積1包(尾數捨去)
   // 例如: 360 代表每360元得1包，1800元訂單得5包
