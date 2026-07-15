@@ -24,13 +24,13 @@ function buildCategoryMenu(categories, headerText) {
   const headerContents = [
     {
       type: 'text',
-      text: '🛒 我們的濾掛品項',
+      text: '🛒 我們的咖啡品項',
       weight: 'bold',
       size: 'xl',
     },
     {
       type: 'text',
-      text: '請選擇您想購買的濾掛選項',
+      text: '請選擇您想購買的品項',
       size: 'sm',
       color: '#999999',
       margin: 'sm',
@@ -51,7 +51,7 @@ function buildCategoryMenu(categories, headerText) {
 
   return {
     type: 'flex',
-    altText: '請選擇濾掛品項',
+    altText: '請選擇購買品項',
     contents: {
       type: 'bubble',
       header: {
@@ -843,7 +843,6 @@ module.exports = {
   buildReferralCode,
   buildReferralCodeInput,
   buildReferralCodeCopyText,
-  buildAdCodeInput,
   buildContactButton,
   buildPaymentButton,
   buildAccountSummary,
@@ -1134,9 +1133,15 @@ function buildPaymentButton(order, paymentUrl) {
     { label: '姓名', value: order.recipientName },
     { label: '電話', value: order.recipientPhone },
     { label: order.locationLabel, value: order.addressOrStore },
+    order.shippingFee > 0
+      ? { label: '商品金額', value: `NT$ ${order.subtotal}` }
+      : null,
+    order.shippingFee > 0
+      ? { label: `運費(未滿NT$${order.freeShippingThreshold})`, value: `NT$ ${order.shippingFee}` }
+      : null,
     { label: '總金額', value: `NT$ ${order.totalAmount}` },
   ]
-    .filter((row) => row.value)
+    .filter((row) => row && row.value)
     .map((row) => ({
       type: 'box',
       layout: 'horizontal',
@@ -1217,51 +1222,4 @@ function buildPaymentButton(order, paymentUrl) {
   };
 }
 
-/**
- * 活動序號輸入卡片
- */
-function buildAdCodeInput() {
-  return {
-    type: 'flex',
-    altText: '請輸入活動序號（選填）',
-    contents: {
-      type: 'bubble',
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        contents: [
-          {
-            type: 'text',
-            text: '🎟️ 活動序號',
-            weight: 'bold',
-            size: 'lg',
-          },
-          {
-            type: 'text',
-            text: '若您是透過活動廣告加入，請輸入活動序號。\n\n沒有活動序號請點下方「略過」。',
-            size: 'sm',
-            color: '#555555',
-            margin: 'md',
-            wrap: true,
-          },
-        ],
-      },
-      footer: {
-        type: 'box',
-        layout: 'vertical',
-        contents: [
-          {
-            type: 'button',
-            style: 'secondary',
-            action: {
-              type: 'postback',
-              label: '略過，沒有活動序號',
-              data: 'action=skipAdCode',
-              displayText: '略過活動序號',
-            },
-          },
-        ],
-      },
-    },
-  };
-}
+

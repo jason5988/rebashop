@@ -126,11 +126,6 @@ async function handleEvent(event) {
       }
     }
 
-    // 等待輸入活動序號
-    if (userStates[userId] === 'AWAITING_AD_CODE') {
-      return handleAdCodeInput(event, userId, text);
-    }
-
     // 等待輸入推薦碼
     if (userStates[userId] === 'AWAITING_REFERRAL_CODE') {
       if (isEscapeCommand) {
@@ -149,7 +144,7 @@ async function handleEvent(event) {
       }
       return client.replyMessage({
         replyToken: event.replyToken,
-        messages: [flex.buildCategoryMenu(categories, config.CATEGORY_HEADER_TEXT)],
+        messages: [flex.buildCategoryMenu(categories)],
       });
     }
 
@@ -164,7 +159,7 @@ async function handleEvent(event) {
     }
 
     if (text === '我的訂單') {
-      const orders = await sheets.getOrdersByUser(userId, 5);
+      const orders = await sheets.getOrdersByUser(userId, 3);
       const message = flex.buildOrderHistory(orders);
       return client.replyMessage({
         replyToken: event.replyToken,
@@ -199,10 +194,16 @@ async function handleEvent(event) {
     }
 
     if (text === '看本月活動' || text === '本月活動') {
+      if (!config.MONTHLY_EVENT_ENABLED) {
+        return replyText(event.replyToken, '此功能目前暫停中，敬請期待！');
+      }
       return replyText(event.replyToken, config.MONTHLY_EVENT_TEXT);
     }
 
     if (text === '團購辦法' || text === '團購') {
+      if (!config.GROUP_BUY_ENABLED) {
+        return replyText(event.replyToken, '此功能目前暫停中，敬請期待！');
+      }
       return replyText(event.replyToken, config.GROUP_BUY_TEXT);
     }
 
@@ -348,16 +349,14 @@ async function handleEvent(event) {
         '',
         '輸入「我要買」查看商品分類',
         '輸入「購物車」查看目前購物車內容',
-        '輸入「我的訂單」查詢歷史訂單',
+        '輸入「我的訂單」查詢歷史訂單(最近三筆)',
       ];
-      if (config.POINTS_ENABLED || config.REFERRAL_ENABLED) {
-        menuLines.push('輸入「查詢帳戶」查看可兌換包數與推薦贈品');
+      if (config.MONTHLY_EVENT_ENABLED) {
+        menuLines.push('輸入「看本月活動」查看最新活動');
       }
-      if (config.REFERRAL_ENABLED) {
-        menuLines.push('輸入「我要推薦碼」取得專屬推薦碼');
+      if (config.GROUP_BUY_ENABLED) {
+        menuLines.push('輸入「團購辦法」了解團購優惠');
       }
-      menuLines.push('輸入「看本月活動」查看最新活動');
-      menuLines.push('輸入「團購辦法」了解團購優惠');
       menuLines.push('輸入「關於我們」認識我們的故事');
       menuLines.push('輸入「跟老闆說說」聯絡我們');
       return replyText(event.replyToken, menuLines.join('\n'));
@@ -589,14 +588,8 @@ async function handleEvent(event) {
       });
     }
 
-    // 略過推薦碼 → 進入活動序號步驟
+    // 略過推薦碼 → 直接建立訂單
     if (action === 'skipReferral') {
-      return proceedToAdCode(event, userId);
-    }
-
-    // 略過活動序號 → 直接建立訂單
-    if (action === 'skipAdCode') {
-      if (pendingCheckouts[userId]) pendingCheckouts[userId].adCode = '';
       const note = pendingCheckouts[userId]?.note || '';
       return finalizeOrder(event, userId, note);
     }
@@ -731,13 +724,15 @@ async function handleRedeemInput(event, userId, text) {
  */
 async function proceedToReferral(event, userId) {
   if (!config.REFERRAL_ENABLED) {
-    return proceedToAdCode(event, userId);
+    const note = pendingCheckouts[userId]?.note || '';
+    return finalizeOrder(event, userId, note);
   }
   const alreadyUsed = config.REFERRAL_LIMIT_ONCE
     ? await sheets.checkUserUsedReferral(userId)
     : false;
   if (alreadyUsed) {
-    return proceedToAdCode(event, userId);
+    const note = pendingCheckouts[userId]?.note || '';
+    return finalizeOrder(event, userId, note);
   }
 
   userStates[userId] = 'AWAITING_REFERRAL_CODE';
@@ -775,38 +770,7 @@ async function handleReferralCodeInput(event, userId, text) {
   }
 
   userStates[userId] = null;
-  return proceedToAdCode(event, userId);
-}
-
-/**
- * 進入活動序號輸入步驟
- */
-async function proceedToAdCode(event, userId) {
-  userStates[userId] = 'AWAITING_AD_CODE';
-  return client.replyMessage({
-    replyToken: event.replyToken,
-    messages: [flex.buildAdCodeInput()],
-  });
-}
-
-/**
- * 處理客人輸入的活動序號
- */
-async function handleAdCodeInput(event, userId, text) {
-  const adCode = text.trim().toUpperCase();
-
-  const validCodes = Object.values(config.AD_CODES || {});
-  const isValid = validCodes.includes(adCode);
-
-  if (pendingCheckouts[userId]) {
-    pendingCheckouts[userId].adCode = isValid ? adCode : '';
-    pendingCheckouts[userId].adCodeValid = isValid;
-  }
-
-  userStates[userId] = null;
   const note = pendingCheckouts[userId]?.note || '';
-
-  // 直接進入建立訂單，驗證結果會顯示在付款卡片上
   return finalizeOrder(event, userId, note);
 }
 
@@ -835,10 +799,14 @@ async function finalizeOrder(event, userId, note) {
     return replyText(event.replyToken, '購物車是空的,無法結帳。請輸入「我要買」重新選購。');
   }
 
-  const total = calcTotal(cartItems);
+  const subtotal = calcTotal(cartItems);
+  const shippingFee = subtotal < config.FREE_SHIPPING_THRESHOLD ? config.SHIPPING_FEE : 0;
+  const total = subtotal + shippingFee;
   const orderId = generateOrderId();
   const itemsText = cartItems.map((item) => `${item.name} x${item.quantity}`).join(', ');
-  const itemNameForEcpay = cartItems.map((item) => `${item.name} x${item.quantity}`).join('#');
+  const itemNameForEcpay = shippingFee > 0
+    ? cartItems.map((item) => `${item.name} x${item.quantity}`).join('#') + `#運費 x1`
+    : cartItems.map((item) => `${item.name} x${item.quantity}`).join('#');
 
   // 從 checkout 取出拆分後的收件資訊
   const isCVS = checkout.deliveryMethod === '超商取貨';
@@ -863,13 +831,6 @@ async function finalizeOrder(event, userId, note) {
   if (redeemItems > 0) {
     const redeemNote = `兌換:${redeemItems}`;
     finalNote = finalNote ? `${finalNote}、${redeemNote}` : redeemNote;
-  }
-
-  // 活動序號記錄在備註
-  const adCode = checkout.adCode || '';
-  if (adCode) {
-    const adNote = `活動序號:${adCode}`;
-    finalNote = finalNote ? `${finalNote}、${adNote}` : adNote;
   }
 
   // 寫入訂單到 Google Sheets
@@ -918,9 +879,6 @@ async function finalizeOrder(event, userId, note) {
   const referralMsg = referralSuccess
     ? `🎁 推薦碼「${referralCode}」驗證成功！付款後雙方各獲得 ${config.REFERRAL_GIFT_BAGS} 包濾掛咖啡。`
     : '';
-  const adMsg = (checkout.adCode && checkout.adCodeValid)
-    ? `🎉 活動序號「${checkout.adCode}」驗證成功！感謝您的支持 😊`
-    : '';
 
   return client.replyMessage({
     replyToken: event.replyToken,
@@ -933,9 +891,12 @@ async function finalizeOrder(event, userId, note) {
           recipientPhone,
           locationLabel,
           addressOrStore,
+          subtotal,
+          shippingFee,
+          freeShippingThreshold: config.FREE_SHIPPING_THRESHOLD,
           totalAmount: total,
           noteText: [noteText, redeemText].filter(Boolean).join('\n'),
-          referralMsg: [referralMsg, adMsg].filter(Boolean).join('\n'),
+          referralMsg: referralMsg,
         },
         paymentUrl
       ),
@@ -1128,17 +1089,6 @@ app.post('/ecpay/callback', express.urlencoded({ extended: false }), async (req,
         // ===== 推播付款成功通知（整合所有活動資訊）=====
         const activity1Bags = earnedPoints;
 
-        // 廣告贈品：首單且有廣告序號才送1包
-        const adCodeInNote = (order.note || '').match(/活動序號:([A-Z0-9]+)/);
-        const hasAdCode = adCodeInNote && Object.values(config.AD_CODES || {}).includes(adCodeInNote[1]);
-        const isFirst = hasAdCode ? await sheets.isFirstPaidOrder(order.userId, orderId) : false;
-        const adGiftBags = (hasAdCode && isFirst) ? 1 : 0;
-
-        // 廣告贈品加入出貨備註
-        if (adGiftBags > 0) {
-          shippingRemarkParts.push(`廣告贈品 1 包（隨機烘焙度）`);
-        }
-
         // 組合最終出貨備註並更新
         const shippingRemark = shippingRemarkParts.length > 0
           ? shippingRemarkParts.join('；')
@@ -1159,9 +1109,6 @@ app.post('/ecpay/callback', express.urlencoded({ extended: false }), async (req,
         }
         if (activity1Bags > 0) {
           noticeLines.push(`・下單立馬送（活動1）：${activity1Bags} 包`);
-        }
-        if (adGiftBags > 0) {
-          noticeLines.push(`・廣告贈品：1 包濾掛咖啡（款式由店家隨機挑選）`);
         }
         if (refereeGiftText) {
           noticeLines.push(`・被推薦人禮（活動3）：${config.REFERRAL_GIFT_BAGS} 包`);
