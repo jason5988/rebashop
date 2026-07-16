@@ -31,6 +31,7 @@ const carts = {}; // { userId: [{ id, name, price, quantity }] }
 //   'AWAITING_SHIPPING_INFO'   - 等待輸入宅配地址
 //   'AWAITING_CVS_INFO'        - 等待輸入超商門市資訊
 //   'AWAITING_REDEEM'          - 等待輸入兌換包數
+//   'AWAITING_WELFARE_CODE'    - 等待輸入福委代碼(或略過)
 //   'AWAITING_NOTE'            - 等待輸入備註(或略過)
 //   'AWAITING_REFERRAL_CODE'   - 等待輸入推薦碼(或略過)
 const userStates = {};
@@ -99,6 +100,17 @@ async function handleEvent(event) {
         // 繼續往下執行該指令
       } else {
         return handleCvsInfoInput(event, userId, text);
+      }
+    }
+
+    // 等待輸入福委代碼
+    if (userStates[userId] === 'AWAITING_WELFARE_CODE') {
+      if (isEscapeCommand) {
+        userStates[userId] = null;
+        pendingCheckouts[userId] = null;
+        // 繼續往下執行該指令
+      } else {
+        return handleWelfareCodeInput(event, userId, text);
       }
     }
 
@@ -569,20 +581,22 @@ async function handleEvent(event) {
       );
     }
 
+    // 略過福委代碼 → 進入備註步驟
+    if (action === 'skipWelfareCode') {
+      if (pendingCheckouts[userId]) pendingCheckouts[userId].welfareCode = '';
+      return proceedToNote(event, userId);
+    }
+
     // 略過備註 → 進入推薦碼詢問步驟
     if (action === 'skipNote') {
       if (pendingCheckouts[userId]) pendingCheckouts[userId].note = '';
       return proceedToReferral(event, userId);
     }
 
-    // 略過點數兌換 → 進入備註步驟
+    // 略過點數兌換 → 進入福委代碼步驟
     if (action === 'skipRedeem') {
       if (pendingCheckouts[userId]) pendingCheckouts[userId].redeemItems = 0;
-      userStates[userId] = 'AWAITING_NOTE';
-      return client.replyMessage({
-        replyToken: event.replyToken,
-        messages: [flex.buildNoteChoice()],
-      });
+      return proceedToWelfareCode(event, userId);
     }
 
     // 店家點選同名客人列表後，依電話查詢
@@ -669,11 +683,7 @@ async function handleCvsInfoInput(event, userId, text) {
  */
 async function proceedToRedeemOrNote(event, userId) {
   if (!config.POINTS_ENABLED) {
-    userStates[userId] = 'AWAITING_NOTE';
-    return client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [flex.buildNoteChoice()],
-    });
+    return proceedToWelfareCode(event, userId);
   }
   const points = await sheets.getPoints(userId);
   if (points > 0) {
@@ -683,7 +693,33 @@ async function proceedToRedeemOrNote(event, userId) {
       messages: [flex.buildRedeemChoice(points, config)],
     });
   }
-  // 沒有點數，直接進入備註步驟
+  // 沒有點數，直接進入福委代碼步驟
+  return proceedToWelfareCode(event, userId);
+}
+
+/**
+ * 進入福委代碼輸入步驟
+ */
+async function proceedToWelfareCode(event, userId) {
+  userStates[userId] = 'AWAITING_WELFARE_CODE';
+  return client.replyMessage({
+    replyToken: event.replyToken,
+    messages: [flex.buildWelfareCodeChoice()],
+  });
+}
+
+/**
+ * 處理客人輸入的福委代碼
+ */
+async function handleWelfareCodeInput(event, userId, text) {
+  if (pendingCheckouts[userId]) pendingCheckouts[userId].welfareCode = text.trim();
+  return proceedToNote(event, userId);
+}
+
+/**
+ * 進入備註輸入步驟
+ */
+async function proceedToNote(event, userId) {
   userStates[userId] = 'AWAITING_NOTE';
   return client.replyMessage({
     replyToken: event.replyToken,
@@ -716,15 +752,12 @@ async function handleRedeemInput(event, userId, text) {
   if (!pendingCheckouts[userId]) pendingCheckouts[userId] = {};
   pendingCheckouts[userId].redeemItems = num;
 
-  // 進入備註步驟
-  userStates[userId] = 'AWAITING_NOTE';
+  // 進入福委代碼步驟
   if (num === 0) {
-    return client.replyMessage({
-      replyToken: event.replyToken,
-      messages: [flex.buildNoteChoice()],
-    });
+    return proceedToWelfareCode(event, userId);
   }
-  // 有兌換 → 先告知再進備註
+  // 有兌換 → 先告知再進福委代碼步驟
+  userStates[userId] = 'AWAITING_WELFARE_CODE';
   return client.replyMessage({
     replyToken: event.replyToken,
     messages: [
@@ -732,7 +765,7 @@ async function handleRedeemInput(event, userId, text) {
         type: 'text',
         text: `已記錄兌換 ${num} 包${config.REDEEM_PRODUCT_NAME}，將加入訂單備註隨貨寄出。✅`,
       },
-      flex.buildNoteChoice(),
+      flex.buildWelfareCodeChoice(),
     ],
   });
 }
@@ -845,6 +878,12 @@ async function finalizeOrder(event, userId, note) {
     const referralNote = `推薦碼:${referralCode}`;
     finalNote = finalNote ? `${finalNote}、${referralNote}` : referralNote;
   }
+  // 福委代碼加入備註
+  const welfareCode = checkout.welfareCode || '';
+  if (welfareCode) {
+    const welfareNote = `福委代碼:${welfareCode}`;
+    finalNote = finalNote ? `${finalNote}、${welfareNote}` : welfareNote;
+  }
   // 兌換包數也記錄在備註供出貨備註解析(但格式改為隱藏前綴避免客人看到)
   if (redeemItems > 0) {
     const redeemNote = `兌換:${redeemItems}`;
@@ -888,11 +927,13 @@ async function finalizeOrder(event, userId, note) {
   // 整理顯示給客人的備註（移除系統標記，只保留客人輸入的部分）
   const displayNote = finalNote
     .split('、')
-    .filter((part) => !part.startsWith('推薦碼:') && !part.startsWith('兌換:'))
+    .filter((part) => !part.startsWith('推薦碼:') && !part.startsWith('兌換:') && !part.startsWith('福委代碼:'))
     .join('、');
   const noteText = displayNote ? `備註: ${displayNote}` : '';
   // 若有兌換則顯示給客人
   const redeemText = redeemItems > 0 ? `兌換 ${redeemItems} 包${config.REDEEM_PRODUCT_NAME}（付款後隨貨寄出）` : '';
+  // 若有福委代碼則顯示給客人
+  const welfareText = welfareCode ? `福委代碼: ${welfareCode}` : '';
   const locationLabel = isCVS ? '取貨門市' : '地址';
   const referralMsg = referralSuccess
     ? `🎁 推薦碼「${referralCode}」驗證成功！付款後雙方各獲得 ${config.REFERRAL_GIFT_BAGS} 包濾掛咖啡。`
@@ -913,7 +954,7 @@ async function finalizeOrder(event, userId, note) {
           shippingFee,
           freeShippingThreshold: config.FREE_SHIPPING_THRESHOLD,
           totalAmount: total,
-          noteText: [noteText, redeemText].filter(Boolean).join('\n'),
+          noteText: [noteText, redeemText, welfareText].filter(Boolean).join('\n'),
           referralMsg: referralMsg,
         },
         paymentUrl

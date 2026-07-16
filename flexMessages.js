@@ -851,6 +851,7 @@ module.exports = {
   buildDeliveryChoice,
   buildConvenienceStoreChoice,
   buildNoteChoice,
+  buildWelfareCodeChoice,
   buildPointsInfo,
   buildRedeemChoice,
   buildReferralCode,
@@ -1089,6 +1090,52 @@ function buildConvenienceStoreChoice() {
 /**
  * 詢問客人是否有備註(結帳最後一步)
  */
+function buildWelfareCodeChoice() {
+  return {
+    type: 'flex',
+    altText: '請輸入福委代碼(選填)',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          {
+            type: 'text',
+            text: '🏢 福委代碼',
+            weight: 'bold',
+            size: 'lg',
+          },
+          {
+            type: 'text',
+            text: '若您是透過公司福委申購，請直接輸入福委代碼。\n若沒有，請點選下方「略過」按鈕。',
+            size: 'sm',
+            color: '#555555',
+            margin: 'md',
+            wrap: true,
+          },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          {
+            type: 'button',
+            style: 'secondary',
+            action: {
+              type: 'postback',
+              label: '略過，沒有福委代碼',
+              data: 'action=skipWelfareCode',
+              displayText: '略過福委代碼',
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
 function buildNoteChoice() {
   return {
     type: 'flex',
@@ -1107,7 +1154,7 @@ function buildNoteChoice() {
           },
           {
             type: 'text',
-            text: '如有特殊需求或備註，請直接輸入文字。\n若沒有備註，請點選下方「略過」按鈕。',
+            text: '若有特殊需求或備註，請直接輸入文字。\n例如：需研磨/手沖',
             size: 'sm',
             color: '#555555',
             margin: 'md',
